@@ -2,8 +2,6 @@
 
 source "https://rubygems.org"
 
-ruby file: ".ruby-version"
-
 # Specify your gem"s dependencies in standard_id_apple.gemspec
 gemspec
 
