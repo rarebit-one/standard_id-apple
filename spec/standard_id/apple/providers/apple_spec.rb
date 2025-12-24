@@ -12,17 +12,17 @@ RSpec.describe StandardId::Providers::Apple do
   let(:test_kid) { "TEST_KID_123" }
 
   before do
-    StandardId.config.social.apple_client_id = apple_client_id
-    StandardId.config.social.apple_team_id = apple_team_id
-    StandardId.config.social.apple_key_id = apple_key_id
-    StandardId.config.social.apple_private_key = apple_private_key
+    StandardId.config.apple_client_id = apple_client_id
+    StandardId.config.apple_team_id = apple_team_id
+    StandardId.config.apple_key_id = apple_key_id
+    StandardId.config.apple_private_key = apple_private_key
   end
 
   after do
-    StandardId.config.social.apple_client_id = nil
-    StandardId.config.social.apple_team_id = nil
-    StandardId.config.social.apple_key_id = nil
-    StandardId.config.social.apple_private_key = nil
+    StandardId.config.apple_client_id = nil
+    StandardId.config.apple_team_id = nil
+    StandardId.config.apple_key_id = nil
+    StandardId.config.apple_private_key = nil
   end
 
   describe "interface compliance" do
@@ -96,7 +96,7 @@ RSpec.describe StandardId::Providers::Apple do
     end
 
     context "when client_id is not configured" do
-      before { StandardId.config.social.apple_client_id = nil }
+      before { StandardId.config.apple_client_id = nil }
 
       it "raises an error" do
         expect do
@@ -219,11 +219,11 @@ RSpec.describe StandardId::Providers::Apple do
       let(:mobile_client_id) { "com.example.mobileapp" }
 
       before do
-        StandardId.config.social.apple_mobile_client_id = mobile_client_id
+        StandardId.config.apple_mobile_client_id = mobile_client_id
       end
 
       after do
-        StandardId.config.social.apple_mobile_client_id = nil
+        StandardId.config.apple_mobile_client_id = nil
       end
 
       it "uses provided client_id for exchange" do
@@ -264,7 +264,7 @@ RSpec.describe StandardId::Providers::Apple do
     end
 
     context "when credentials are incomplete" do
-      before { StandardId.config.social.apple_private_key = nil }
+      before { StandardId.config.apple_private_key = nil }
 
       it "raises an error" do
         expect do
@@ -317,11 +317,11 @@ RSpec.describe StandardId::Providers::Apple do
       let(:mobile_client_id) { "com.example.mobileapp" }
 
       before do
-        StandardId.config.social.apple_mobile_client_id = mobile_client_id
+        StandardId.config.apple_mobile_client_id = mobile_client_id
       end
 
       after do
-        StandardId.config.social.apple_mobile_client_id = nil
+        StandardId.config.apple_mobile_client_id = nil
       end
 
       it "verifies id_token with mobile client_id successfully" do

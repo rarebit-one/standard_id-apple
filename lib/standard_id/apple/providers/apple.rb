@@ -25,7 +25,7 @@ module StandardId
           ensure_basic_credentials!
 
           query = {
-            client_id: StandardId.config.social.apple_client_id,
+            client_id: StandardId.config.apple_client_id,
             redirect_uri: redirect_uri,
             response_type: "code",
             scope: scope,
@@ -37,7 +37,7 @@ module StandardId
         end
 
         def get_user_info(code: nil, id_token: nil, access_token: nil, redirect_uri: nil, **options)
-          client_id = options[:client_id] || StandardId.config.social.apple_client_id
+          client_id = options[:client_id] || StandardId.config.apple_client_id
 
           if id_token.present?
             build_response(
@@ -77,12 +77,12 @@ module StandardId
 
         def resolve_params(params, context: {})
           flow = context[:flow] || :web
-          client_id = flow == :mobile ? StandardId.config.social.apple_mobile_client_id : StandardId.config.social.apple_client_id
+          client_id = flow == :mobile ? StandardId.config.apple_mobile_client_id : StandardId.config.apple_client_id
 
           params.merge(client_id: client_id)
         end
 
-        def exchange_code_for_user_info(code:, redirect_uri:, client_id: StandardId.config.social.apple_client_id)
+        def exchange_code_for_user_info(code:, redirect_uri:, client_id: StandardId.config.apple_client_id)
           ensure_full_credentials!(client_id: client_id)
           raise StandardId::InvalidRequestError, "Missing authorization code" if code.blank?
 
@@ -117,7 +117,7 @@ module StandardId
           raise StandardId::OAuthError, e.message, cause: e
         end
 
-        def verify_id_token(id_token:, client_id: StandardId.config.social.apple_client_id)
+        def verify_id_token(id_token:, client_id: StandardId.config.apple_client_id)
           raise StandardId::InvalidRequestError, "Missing id_token" if id_token.blank?
           raise StandardId::InvalidRequestError, "Apple client_id is not configured" if client_id.blank?
 
@@ -155,7 +155,7 @@ module StandardId
 
         private
 
-        def ensure_basic_credentials!(client_id: StandardId.config.social.apple_client_id)
+        def ensure_basic_credentials!(client_id: StandardId.config.apple_client_id)
           return if client_id.present?
 
           raise StandardId::InvalidRequestError, "Apple OAuth is not configured"
@@ -165,9 +165,9 @@ module StandardId
           ensure_basic_credentials!(client_id: client_id)
 
           required = [
-            StandardId.config.social.apple_private_key,
-            StandardId.config.social.apple_key_id,
-            StandardId.config.social.apple_team_id
+            StandardId.config.apple_private_key,
+            StandardId.config.apple_key_id,
+            StandardId.config.apple_team_id
           ]
 
           return unless required.any?(&:blank?)
@@ -175,21 +175,21 @@ module StandardId
           raise StandardId::InvalidRequestError, "Apple OAuth credentials are incomplete"
         end
 
-        def generate_client_secret(client_id: StandardId.config.social.apple_client_id)
+        def generate_client_secret(client_id: StandardId.config.apple_client_id)
           header = {
             alg: "ES256",
-            kid: StandardId.config.social.apple_key_id
+            kid: StandardId.config.apple_key_id
           }
 
           payload = {
-            iss: StandardId.config.social.apple_team_id,
+            iss: StandardId.config.apple_team_id,
             iat: Time.current.to_i,
             exp: Time.current.to_i + 3600,
             aud: ISSUER,
             sub: client_id
           }
 
-          private_key = OpenSSL::PKey::EC.new(StandardId.config.social.apple_private_key)
+          private_key = OpenSSL::PKey::EC.new(StandardId.config.apple_private_key)
           JWT.encode(payload, private_key, "ES256", header)
         end
 
