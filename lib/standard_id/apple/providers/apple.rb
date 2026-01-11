@@ -12,40 +12,47 @@ module StandardId
       JWKS_URI = "#{ISSUER}/auth/keys".freeze
       DEFAULT_SCOPE = "name email".freeze
       DEFAULT_RESPONSE_MODE = "form_post".freeze
+      AUTHORIZATION_PARAM_DEFAULTS = {
+        scope: DEFAULT_SCOPE,
+        response_mode: DEFAULT_RESPONSE_MODE
+      }.freeze
 
       class << self
         def provider_name
           "apple"
         end
 
-        def authorization_url(state:, redirect_uri:, **options)
-          scope = options[:scope] || DEFAULT_SCOPE
-          response_mode = options[:response_mode] || DEFAULT_RESPONSE_MODE
+        def supported_authorization_params
+          [:nonce, :scope, :response_mode]
+        end
 
+        def authorization_url(state:, redirect_uri:, **options)
           ensure_basic_credentials!
 
           query = {
             client_id: StandardId.config.apple_client_id,
-            redirect_uri: redirect_uri,
+            redirect_uri:,
             response_type: "code",
-            scope: scope,
-            response_mode: response_mode,
-            state: state
+            state:
           }
 
-          "#{AUTH_ENDPOINT}?#{URI.encode_www_form(query)}"
+          supported_authorization_params.each do |param|
+            query[param] = options[param] || AUTHORIZATION_PARAM_DEFAULTS[param]
+          end
+
+          "#{AUTH_ENDPOINT}?#{URI.encode_www_form(query.compact)}"
         end
 
-        def get_user_info(code: nil, id_token: nil, access_token: nil, redirect_uri: nil, **options)
+        def get_user_info(code: nil, id_token: nil, access_token: nil, redirect_uri: nil, nonce: nil, **options)
           client_id = options[:client_id] || StandardId.config.apple_client_id
 
           if id_token.present?
             build_response(
-              verify_id_token(id_token: id_token, client_id: client_id),
+              verify_id_token(id_token: id_token, client_id: client_id, nonce: nonce),
               tokens: { id_token: id_token }
             )
           elsif code.present?
-            exchange_code_for_user_info(code: code, redirect_uri: redirect_uri, client_id: client_id)
+            exchange_code_for_user_info(code: code, redirect_uri: redirect_uri, client_id: client_id, nonce: nonce)
           elsif access_token.present?
             raise StandardId::InvalidRequestError, "Access token login flow is not supported for Apple"
           else
@@ -82,7 +89,7 @@ module StandardId
           params.merge(client_id: client_id)
         end
 
-        def exchange_code_for_user_info(code:, redirect_uri:, client_id: StandardId.config.apple_client_id)
+        def exchange_code_for_user_info(code:, redirect_uri:, client_id: StandardId.config.apple_client_id, nonce: nil)
           ensure_full_credentials!(client_id: client_id)
           raise StandardId::InvalidRequestError, "Missing authorization code" if code.blank?
 
@@ -108,7 +115,7 @@ module StandardId
           raise StandardId::InvalidRequestError, "Apple response missing id_token" if id_token.blank?
 
           tokens = extract_token_payload(parsed_token)
-          user_info = verify_id_token(id_token: id_token, client_id: client_id)
+          user_info = verify_id_token(id_token: id_token, client_id: client_id, nonce: nonce)
 
           build_response(user_info, tokens: tokens)
         rescue StandardError => e
@@ -117,7 +124,7 @@ module StandardId
           raise StandardId::OAuthError, e.message, cause: e
         end
 
-        def verify_id_token(id_token:, client_id: StandardId.config.apple_client_id)
+        def verify_id_token(id_token:, client_id: StandardId.config.apple_client_id, nonce: nil)
           raise StandardId::InvalidRequestError, "Missing id_token" if id_token.blank?
           raise StandardId::InvalidRequestError, "Apple client_id is not configured" if client_id.blank?
 
@@ -136,6 +143,15 @@ module StandardId
             aud: client_id,
             verify_aud: true
           )
+
+          # Validate nonce if provided (web flow with server-generated nonce)
+          if nonce.present?
+            token_nonce = verified_payload["nonce"]
+            if token_nonce != nonce
+              raise StandardId::InvalidRequestError,
+                    "ID token nonce mismatch. Expected: #{nonce}, got: #{token_nonce}"
+            end
+          end
 
           {
             "sub" => verified_payload["sub"],

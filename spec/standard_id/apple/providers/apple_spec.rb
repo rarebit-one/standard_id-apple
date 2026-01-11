@@ -93,6 +93,18 @@ RSpec.describe StandardId::Providers::Apple do
         params = URI.decode_www_form(URI(url).query).to_h
         expect(params["response_mode"]).to eq("query")
       end
+
+      it "accepts multiple extra parameters" do
+        url = described_class.authorization_url(
+          state: state,
+          redirect_uri: redirect_uri,
+          nonce: "random_nonce_value",
+          response_mode: "form_post"
+        )
+
+        expect(url).to include("nonce=random_nonce_value")
+        expect(url).to include("response_mode=form_post")
+      end
     end
 
     context "when client_id is not configured" do
