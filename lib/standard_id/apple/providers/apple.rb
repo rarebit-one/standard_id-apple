@@ -240,5 +240,3 @@ module StandardId
     end
   end
 end
-
-StandardId::ProviderRegistry.register(:apple, StandardId::Providers::Apple)
