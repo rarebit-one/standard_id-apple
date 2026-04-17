@@ -2,3 +2,4 @@ require "active_support/core_ext/numeric/time"
 require "active_support/core_ext/hash/indifferent_access"
 require "standard_id"
 require "standard_id/apple/providers/apple"
+require "standard_id/apple/railtie" if defined?(Rails)
