@@ -137,7 +137,7 @@ module StandardId
             id_token,
             jwk.public_key,
             true,
-            algorithm: "RS256",
+            algorithms: ["RS256"],
             iss: ISSUER,
             verify_iss: true,
             aud: client_id,
