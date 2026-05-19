@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-19
+
+### Changed
+
+- Relaxed `jwt` dependency constraint from `~> 2.7` to `>= 2.7, < 4`, allowing consumers to satisfy the GHSA security advisory for `jwt` 2.x by upgrading to `jwt` 3.x. The provider's `JWT.encode` / `JWT.decode` call sites already pass an explicit algorithm and are compatible with the 3.x API surface.
+
 ## [0.3.0] - 2026-04-29
 
 ### Added
