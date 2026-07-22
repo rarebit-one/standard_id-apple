@@ -4,7 +4,7 @@ PATH
     standard_id-apple (0.4.0)
       activesupport (>= 8.0)
       jwt (>= 2.7, < 4)
-      standard_id (~> 0.1, >= 0.1.7)
+      standard_id (~> 0.29.0)
 
 GEM
   remote: https://rubygems.org/
