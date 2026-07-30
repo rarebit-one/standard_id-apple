@@ -30,11 +30,20 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "activesupport", ">= 8.0"
   spec.add_dependency "jwt", ">= 2.7", "< 4"
-  # Pinned to the standard_id 0.29 series. This plugin reaches into internals
-  # (StandardId::ProviderRegistry, StandardId::Providers::Apple), and standard_id
-  # is pre-1.0 with breaking minors, so `~> 0.1` was claiming compatibility with
-  # releases this gem has never been tested against. A hard resolution failure on
-  # the next minor is the intended behaviour: it forces a compatibility check and
-  # a plugin release instead of a runtime break in a consumer.
-  spec.add_dependency "standard_id", "~> 0.29.0"
+  # This plugin reaches into standard_id internals (StandardId::ProviderRegistry,
+  # StandardId::Providers::Apple), so its compatibility with a given standard_id
+  # really does need checking rather than assuming.
+  #
+  # That check is enforced in CI (the `compat` job resolves and tests against the
+  # LATEST PUBLISHED standard_id), not by a narrow runtime constraint. A narrow
+  # constraint was tried — `~> 0.29.0` — and it failed badly: standard_id went to
+  # 0.30, 0.31 and 0.32 with no compatibility check and no plugin release, while
+  # the *published* 0.4.0 kept the older loose `~> 0.1` requirement. So consumers
+  # ran the untested combination anyway, and the cap sat unreleased on main as a
+  # loaded gun: publishing this gem would have forced luminality-web and
+  # sidekick-web back to the 0.29 series or broken resolution outright.
+  #
+  # Resolution-time caps only work if someone acts on every failure. CI failing
+  # the maintainer is strictly better than bundler failing five consumers.
+  spec.add_dependency "standard_id", ">= 0.29", "< 1.0"
 end
