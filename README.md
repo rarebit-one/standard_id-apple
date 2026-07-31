@@ -20,10 +20,25 @@ bundle install
 
 The gem automatically registers itself with StandardId when it is required.
 
+Then run the install generator to drop the credentials block in place:
+
+```bash
+bin/rails g standard_id:apple:install
+```
+
+This writes `config/initializers/standard_id_apple.rb` — deliberately a
+separate file from `config/initializers/standard_id.rb`, so the provider can be
+removed by deleting one file and `standard_id`'s own install generator stays
+free to overwrite its initializer without clobbering these values. Initializers
+load alphabetically, so the base config is applied first. The generator is
+idempotent; re-running on an existing initializer skips with a clear message
+(pass `--force` to overwrite).
+
 ## Configuration
 
-Configure Apple credentials via the StandardId configuration block, in the
-`social` scope:
+The generator writes this for you; the block is documented here for hosts
+configuring by hand. Configure Apple credentials via the StandardId
+configuration block, in the `social` scope:
 
 ```ruby
 # config/initializers/standard_id.rb

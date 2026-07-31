@@ -1,0 +1,42 @@
+# frozen_string_literal: true
+
+# Apple Sign In credentials for StandardId.
+#
+# These five fields are declared by the standard_id-apple gem, NOT by
+# standard_id — they do not exist unless this gem is in the Gemfile, on any
+# standard_id version. Removing the gem and leaving this file behind raises
+# `StandardId::ConfigurationError: Unknown field 'apple_client_id' for scope
+# 'social'`, which is correct behaviour, not a bug.
+#
+# Set them in the `social` scope, as below. The unqualified form
+# (`config.apple_client_id = ...`) happens to work today because StandardId
+# routes a unique unqualified name to its owning scope, but it stops working
+# the day another scope declares a colliding name. Use `config.social.`.
+#
+# On standard_id <= 0.32.0 these fields were declared from this gem's Railtie
+# `after_initialize`, which runs AFTER config/initializers — so the plain block
+# below raised at boot and had to be wrapped:
+#
+#   Rails.application.config.after_initialize do
+#     StandardId.configure { |config| config.social.apple_client_id = ... }
+#   end
+#
+# standard_id >= 0.33.0 declares every loaded provider's fields before
+# `:load_config_initializers`, so the plain form is correct. Existing wrappers
+# keep working and need no change.
+StandardId.configure do |config|
+  config.social.apple_client_id = ENV["APPLE_CLIENT_ID"]
+
+  # Optional: only set when a native iOS client signs in against the same
+  # backend. Its audience differs from the web Services ID, so leaving it nil
+  # on a web-only app is correct — don't point it at APPLE_CLIENT_ID.
+  config.social.apple_mobile_client_id = ENV["APPLE_MOBILE_CLIENT_ID"]
+
+  config.social.apple_team_id = ENV["APPLE_TEAM_ID"]
+  config.social.apple_key_id = ENV["APPLE_KEY_ID"]
+
+  # The .p8 contents in PEM form, newlines intact. Secret stores that flatten
+  # multi-line values to literal \n produce a key that parses but fails to
+  # sign — surfacing as a JWT error at callback time, not at boot.
+  config.social.apple_private_key = ENV["APPLE_PRIVATE_KEY_PEM"]
+end
