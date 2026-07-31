@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Install generator: `bin/rails g standard_id:apple:install`.** Writes
+  `config/initializers/standard_id_apple.rb` with all five `social.apple_*`
+  fields wired to ENV, then prints the environment variables the host has to
+  set (including the warning that `APPLE_PRIVATE_KEY_PEM` is multi-line and
+  that a secret store which flattens it to literal `\n` produces a key that
+  parses but fails to sign — surfacing as a JWT error at callback time, not at
+  boot). Idempotent: re-running skips an existing initializer; `--force`
+  overwrites, `--skip-initializer` writes nothing.
+
+  It writes a **separate** file rather than editing `standard_id.rb`, so the
+  provider can be removed by deleting one file and `standard_id`'s own install
+  generator stays free to overwrite its initializer without clobbering these
+  credentials. Initializers load alphabetically, so the base config is applied
+  first. The generated file uses the `config.social.` form throughout — a spec
+  pins that it never emits the unqualified `config.apple_*` form, which works
+  today only because the names happen to be unique across scopes.
+
+  Five of the nine `standard_*` gems shipped an install generator and this was
+  not one of them, which left both consumers assembling the block from the
+  README by hand.
+
 ### Documentation
+
+- **Consumer list corrected in `CLAUDE.md`: this gem has two consumers, not
+  one.** It named `luminality-web` only; `sidekick-web` also consumes it. Both
+  live in sibling workspaces rather than beside this repo, which is how the
+  second one went unnoticed.
 
 - **Corrected the Configuration section, which was wrong in two ways.**
 
