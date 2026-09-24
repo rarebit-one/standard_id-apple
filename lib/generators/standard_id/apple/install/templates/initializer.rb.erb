@@ -13,17 +13,17 @@
 # routes a unique unqualified name to its owning scope, but it stops working
 # the day another scope declares a colliding name. Use `config.social.`.
 #
-# On standard_id <= 0.32.0 these fields were declared from this gem's Railtie
-# `after_initialize`, which runs AFTER config/initializers — so the plain block
-# below raised at boot and had to be wrapped:
+# ENV: on standard_id >= 0.42 a field this file does not assign falls back to
+# the ENV variable named after it, upper-cased — APPLE_CLIENT_ID,
+# APPLE_MOBILE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY — which
+# are the names used below. The assignments are kept so the wiring is visible;
+# delete any you prefer to leave to the fallback, or point one at another
+# source (e.g. Rails credentials).
 #
-#   Rails.application.config.after_initialize do
-#     StandardId.configure { |config| config.social.apple_client_id = ... }
-#   end
-#
-# standard_id >= 0.33.0 declares every loaded provider's fields before
-# `:load_config_initializers`, so the plain form is correct. Existing wrappers
-# keep working and need no change.
+# apple_client_id switches the web flow on. While it is set, StandardId's boot
+# check requires apple_team_id, apple_key_id and apple_private_key (warns by
+# default; `config.social.provider_misconfiguration = :raise` fails a
+# production boot instead).
 StandardId.configure do |config|
   config.social.apple_client_id = ENV["APPLE_CLIENT_ID"]
 
@@ -38,5 +38,6 @@ StandardId.configure do |config|
   # The .p8 contents in PEM form, newlines intact. Secret stores that flatten
   # multi-line values to literal \n produce a key that parses but fails to
   # sign — surfacing as a JWT error at callback time, not at boot.
-  config.social.apple_private_key = ENV["APPLE_PRIVATE_KEY_PEM"]
+  # (Installs before standard_id-apple 0.6.0 used APPLE_PRIVATE_KEY_PEM.)
+  config.social.apple_private_key = ENV["APPLE_PRIVATE_KEY"]
 end

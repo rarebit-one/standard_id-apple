@@ -56,6 +56,16 @@ RSpec.describe StandardId::Apple::Generators::InstallGenerator do
     end
   end
 
+  it "reads the canonical ENV names, which match standard_id's ENV fallback" do
+    run_generator
+    content = File.read(initializer_path)
+
+    %w[APPLE_CLIENT_ID APPLE_MOBILE_CLIENT_ID APPLE_TEAM_ID APPLE_KEY_ID APPLE_PRIVATE_KEY].each do |name|
+      expect(content).to include(%(ENV["#{name}"]))
+    end
+    expect(content).not_to include(%(ENV["APPLE_PRIVATE_KEY_PEM"]))
+  end
+
   # The flat form works today only because the name happens to be unique across
   # scopes; it breaks silently the day it isn't. The generated file must never
   # teach it.
