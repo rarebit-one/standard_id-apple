@@ -499,7 +499,9 @@ RSpec.describe StandardId::Providers::Apple do
 
       it "refetches once on an unknown kid" do
         allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC)
-          .and_return(now + described_class::JWKS_MIN_REFRESH_INTERVAL)
+          # Step just past the floor: `(now + interval) - now` can round to a hair
+          # under `interval` for some clock values, making an exact step flaky.
+          .and_return(now + described_class::JWKS_MIN_REFRESH_INTERVAL + 1)
 
         expect(described_class.verify_id_token(id_token: rotated_token)["sub"]).to eq("a")
         expect(WebMock).to have_requested(:get, described_class::JWKS_URI).twice
