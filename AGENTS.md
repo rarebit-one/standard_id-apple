@@ -58,7 +58,7 @@ The entry file calls `StandardId::Providers.plugin_railtie(:apple, "StandardId::
 ## Dependencies
 
 - **standard_id** `~> 0.42` (parent engine — provides `Providers::Base` and its plugin helpers, `ProviderRegistry`, `HttpClient`, errors)
-- **activesupport** `>= 8.0` (`Time.current`, `present?`/`blank?`, indifferent access)
+- **activesupport** `>= 8.1` (`Time.current`, `present?`/`blank?`, indifferent access)
 - **jwt** `~> 2.7` (id_token decoding, client_secret signing)
 
 Dev: rspec, rubocop, webmock, lefthook.
