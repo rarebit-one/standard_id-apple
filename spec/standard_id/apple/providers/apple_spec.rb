@@ -12,6 +12,7 @@ RSpec.describe StandardId::Providers::Apple do
   let(:test_kid) { "TEST_KID_123" }
 
   before do
+    described_class.reset_jwks_cache!
     StandardId.config.apple_client_id = apple_client_id
     StandardId.config.apple_team_id = apple_team_id
     StandardId.config.apple_key_id = apple_key_id
@@ -28,10 +29,6 @@ RSpec.describe StandardId::Providers::Apple do
   describe "interface compliance" do
     it "inherits from Base" do
       expect(described_class).to be < StandardId::Providers::Base
-    end
-
-    it "is registered with the provider registry" do
-      expect(StandardId::ProviderRegistry.get(:apple)).to eq(described_class)
     end
   end
 
@@ -137,7 +134,7 @@ RSpec.describe StandardId::Providers::Apple do
       it "raises error when id_token is blank" do
         expect do
           described_class.get_user_info(id_token: "")
-        end.to raise_error(StandardId::InvalidRequestError, /Either code or id_token must be provided/)
+        end.to raise_error(StandardId::InvalidRequestError, /Apple sign-in requires a code or an id_token/)
       end
     end
 
@@ -162,7 +159,7 @@ RSpec.describe StandardId::Providers::Apple do
       it "raises error when code is blank" do
         expect do
           described_class.get_user_info(code: "", redirect_uri: redirect_uri)
-        end.to raise_error(StandardId::InvalidRequestError, /Either code or id_token must be provided/)
+        end.to raise_error(StandardId::InvalidRequestError, /Apple sign-in requires a code or an id_token/)
       end
     end
 
@@ -170,7 +167,7 @@ RSpec.describe StandardId::Providers::Apple do
       it "raises an error" do
         expect do
           described_class.get_user_info
-        end.to raise_error(StandardId::InvalidRequestError, /Either code or id_token must be provided/)
+        end.to raise_error(StandardId::InvalidRequestError, /Apple sign-in requires a code or an id_token/)
       end
     end
   end
@@ -260,7 +257,15 @@ RSpec.describe StandardId::Providers::Apple do
 
         expect do
           described_class.exchange_code_for_user_info(code: code, redirect_uri: redirect_uri)
-        end.to raise_error(StandardId::InvalidRequestError, /Failed to exchange Apple authorization code/)
+        end.to raise_error(StandardId::InvalidRequestError, /Failed to exchange Apple authorization code: invalid_grant/)
+      end
+
+      it "falls back to the HTTP status when the body names no error" do
+        stub_request(:post, "https://appleid.apple.com/auth/token").to_return(status: 502, body: "<html>")
+
+        expect do
+          described_class.exchange_code_for_user_info(code: code, redirect_uri: redirect_uri)
+        end.to raise_error(StandardId::InvalidRequestError, /Failed to exchange Apple authorization code: HTTP 502/)
       end
     end
 
@@ -271,7 +276,7 @@ RSpec.describe StandardId::Providers::Apple do
 
         expect do
           described_class.exchange_code_for_user_info(code: code, redirect_uri: redirect_uri)
-        end.to raise_error(StandardId::InvalidRequestError, /Apple response missing id_token/)
+        end.to raise_error(StandardId::InvalidRequestError, /Apple token response is missing id_token/)
       end
     end
 
@@ -281,7 +286,24 @@ RSpec.describe StandardId::Providers::Apple do
       it "raises an error" do
         expect do
           described_class.exchange_code_for_user_info(code: code, redirect_uri: redirect_uri)
-        end.to raise_error(StandardId::InvalidRequestError, /Apple OAuth credentials are incomplete/)
+        end.to raise_error(StandardId::InvalidRequestError, /Apple OAuth credentials are incomplete: apple_private_key not set/)
+      end
+
+      it "does not call Apple" do
+        expect do
+          described_class.exchange_code_for_user_info(code: code, redirect_uri: redirect_uri)
+        end.to raise_error(StandardId::InvalidRequestError)
+        expect(WebMock).not_to have_requested(:post, "https://appleid.apple.com/auth/token")
+      end
+    end
+
+    context "when a non-OAuth error is raised" do
+      it "wraps it in StandardId::OAuthError, keeping the cause" do
+        allow(StandardId::HttpClient).to receive(:post_form).and_raise(Errno::ECONNRESET)
+
+        expect do
+          described_class.exchange_code_for_user_info(code: code, redirect_uri: redirect_uri)
+        end.to raise_error(StandardId::OAuthError) { |error| expect(error.cause).to be_a(Errno::ECONNRESET) }
       end
     end
   end
@@ -366,7 +388,7 @@ RSpec.describe StandardId::Providers::Apple do
 
         expect do
           described_class.verify_id_token(id_token: id_token)
-        end.to raise_error(StandardId::InvalidRequestError, /JWK with kid .* not found/)
+        end.to raise_error(StandardId::InvalidRequestError, /signing key not found in Apple's JWKS/)
       end
     end
 
@@ -378,12 +400,261 @@ RSpec.describe StandardId::Providers::Apple do
 
         expect do
           described_class.verify_id_token(id_token: id_token)
-        end.to raise_error(StandardId::InvalidRequestError, /Failed to fetch Apple JWKS/)
+        end.to raise_error(StandardId::OAuthError, /Failed to fetch Apple JWKS: HTTP 500/)
       end
     end
   end
 
-  def generate_test_id_token(sub:, email:, email_verified: nil, is_private_email: nil, aud: nil, exp: nil)
+  describe "nonce verification" do
+    let(:user_sub) { "001234.nonce" }
+    let(:user_email) { "user@example.com" }
+    let(:expected_nonce) { "server-issued-nonce-4f1c" }
+
+    before { stub_jwks_request }
+
+    it "accepts a matching nonce" do
+      id_token = generate_test_id_token(sub: user_sub, email: user_email, nonce: expected_nonce)
+
+      expect(described_class.verify_id_token(id_token: id_token, nonce: expected_nonce)["sub"]).to eq(user_sub)
+    end
+
+    it "rejects a mismatched nonce without echoing either value" do
+      id_token = generate_test_id_token(sub: user_sub, email: user_email, nonce: "attacker-nonce-9z")
+
+      expect do
+        described_class.verify_id_token(id_token: id_token, nonce: expected_nonce)
+      end.to raise_error(StandardId::InvalidRequestError) { |error|
+        expect(error.message).to eq("ID token nonce mismatch")
+        expect(error.message).not_to include(expected_nonce)
+        expect(error.message).not_to include("attacker-nonce-9z")
+      }
+    end
+
+    it "rejects a token with no nonce when one was issued" do
+      id_token = generate_test_id_token(sub: user_sub, email: user_email)
+
+      expect do
+        described_class.get_user_info(id_token: id_token, nonce: expected_nonce)
+      end.to raise_error(StandardId::InvalidRequestError, "ID token nonce mismatch")
+    end
+
+    it "skips the check when no nonce was issued (native flow)" do
+      id_token = generate_test_id_token(sub: user_sub, email: user_email, nonce: "client-side-nonce")
+
+      expect(described_class.verify_id_token(id_token: id_token)["sub"]).to eq(user_sub)
+    end
+  end
+
+  describe "JWKS fetching" do
+    let(:user_email) { "user@example.com" }
+
+    it "goes through StandardId::HttpClient's address guard" do
+      stub_jwks_request
+      allow(StandardId::HttpClient).to receive(:validate_url!).and_call_original
+
+      described_class.verify_id_token(id_token: generate_test_id_token(sub: "a", email: user_email))
+
+      expect(StandardId::HttpClient).to have_received(:validate_url!).with(described_class::JWKS_URI)
+    end
+
+    it "caches the key set between verifications" do
+      stub = stub_jwks_request
+
+      2.times { described_class.verify_id_token(id_token: generate_test_id_token(sub: "a", email: user_email)) }
+
+      expect(stub).to have_been_requested.once
+    end
+
+    it "refetches after the TTL" do
+      stub = stub_jwks_request
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(now)
+      described_class.verify_id_token(id_token: generate_test_id_token(sub: "a", email: user_email))
+
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC)
+        .and_return(now + described_class::JWKS_CACHE_TTL + 1)
+      described_class.verify_id_token(id_token: generate_test_id_token(sub: "a", email: user_email))
+
+      expect(stub).to have_been_requested.twice
+    end
+
+    context "when Apple rotates its keys" do
+      let(:rotated_key) { OpenSSL::PKey::RSA.new(2048) }
+      let(:rotated_token) do
+        JWT.encode(
+          { iss: "https://appleid.apple.com", aud: apple_client_id, sub: "a", iat: Time.now.to_i, exp: Time.now.to_i + 3600 },
+          rotated_key, "RS256", kid: "ROTATED"
+        )
+      end
+      let(:now) { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+
+      before do
+        stub_request(:get, described_class::JWKS_URI).to_return(
+          { status: 200, body: { keys: [jwk_hash(test_rsa_key, test_kid)] }.to_json },
+          { status: 200, body: { keys: [jwk_hash(test_rsa_key, test_kid), jwk_hash(rotated_key, "ROTATED")] }.to_json }
+        )
+        allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(now)
+        described_class.verify_id_token(id_token: generate_test_id_token(sub: "a", email: user_email))
+      end
+
+      it "refetches once on an unknown kid" do
+        allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC)
+          # Step just past the floor: `(now + interval) - now` can round to a hair
+          # under `interval` for some clock values, making an exact step flaky.
+          .and_return(now + described_class::JWKS_MIN_REFRESH_INTERVAL + 1)
+
+        expect(described_class.verify_id_token(id_token: rotated_token)["sub"]).to eq("a")
+        expect(WebMock).to have_requested(:get, described_class::JWKS_URI).twice
+      end
+
+      it "does not refetch for an unknown kid within the refresh floor" do
+        expect do
+          described_class.verify_id_token(id_token: rotated_token)
+        end.to raise_error(StandardId::InvalidRequestError, /signing key not found/)
+        expect(WebMock).to have_requested(:get, described_class::JWKS_URI).once
+      end
+    end
+
+    it "rejects a token whose header has no kid" do
+      token = JWT.encode({ iss: "https://appleid.apple.com", aud: apple_client_id, sub: "a" }, test_rsa_key, "RS256")
+
+      expect do
+        described_class.verify_id_token(id_token: token)
+      end.to raise_error(StandardId::InvalidRequestError, "Invalid Apple ID token: header has no kid")
+    end
+
+    it "wraps network failures" do
+      stub_request(:get, described_class::JWKS_URI).to_timeout
+
+      expect do
+        described_class.verify_id_token(id_token: generate_test_id_token(sub: "a", email: user_email))
+      end.to raise_error(StandardId::OAuthError, /\AFailed to fetch Apple JWKS: /)
+    end
+  end
+
+  describe ".skip_csrf?" do
+    it "is true, because Apple posts the web callback (form_post)" do
+      expect(described_class.skip_csrf?).to be(true)
+    end
+  end
+
+  describe ".supports_mobile_callback?" do
+    it "is true" do
+      expect(described_class.supports_mobile_callback?).to be(true)
+    end
+  end
+
+  describe ".flow_for" do
+    it "is :web only for flow=web" do
+      expect(described_class.flow_for({ flow: "web" })).to eq(:web)
+      expect(described_class.flow_for({ flow: "WEB" })).to eq(:web)
+    end
+
+    it "is :mobile otherwise" do
+      expect(described_class.flow_for({})).to eq(:mobile)
+      expect(described_class.flow_for({ flow: "ios" })).to eq(:mobile)
+    end
+  end
+
+  describe ".resolve_params" do
+    before { StandardId.config.apple_mobile_client_id = "com.example.mobileapp" }
+    after { StandardId.config.apple_mobile_client_id = nil }
+
+    it "uses the Services ID for the web flow" do
+      expect(described_class.resolve_params({ code: "c" }, context: { flow: :web })).to eq(code: "c", client_id: apple_client_id)
+    end
+
+    it "defaults to the web flow" do
+      expect(described_class.resolve_params({ code: "c" })[:client_id]).to eq(apple_client_id)
+    end
+
+    it "uses the bundle ID for the mobile flow" do
+      expect(described_class.resolve_params({ id_token: "t" }, context: { flow: :mobile })[:client_id]).to eq("com.example.mobileapp")
+    end
+  end
+
+  describe "configuration" do
+    it "requires the three signing credentials" do
+      expect(described_class.required_config_fields).to contain_exactly(:apple_private_key, :apple_key_id, :apple_team_id)
+    end
+
+    it "is enabled by apple_client_id" do
+      expect(described_class.enabling_config_field).to eq(:apple_client_id)
+      expect(described_class).to be_enabled
+      StandardId.config.apple_client_id = nil
+      expect(described_class).not_to be_enabled
+    end
+
+    it "reports missing signing credentials by name while enabled" do
+      StandardId.config.apple_key_id = nil
+      StandardId.config.apple_team_id = ""
+
+      expect(described_class.configuration_errors).to contain_exactly(
+        "apple_key_id is required when apple_client_id is set",
+        "apple_team_id is required when apple_client_id is set"
+      )
+      expect(described_class).not_to be_configured
+    end
+
+    it "reports nothing when disabled, even with credentials missing" do
+      StandardId.config.apple_client_id = nil
+      StandardId.config.apple_private_key = nil
+
+      expect(described_class.configuration_errors).to be_empty
+    end
+
+    describe "ENV fallback" do
+      around do |example|
+        saved = ENV.to_h.slice("APPLE_PRIVATE_KEY", "APPLE_PRIVATE_KEY_PEM", "APPLE_TEAM_ID")
+        example.run
+      ensure
+        %w[APPLE_PRIVATE_KEY APPLE_PRIVATE_KEY_PEM APPLE_TEAM_ID].each { |name| ENV[name] = saved[name] }
+      end
+
+      before do
+        StandardId.config.social.delete(:apple_private_key)
+        StandardId.config.social.delete(:apple_team_id)
+        described_class.instance_variable_set(:@legacy_private_key_warned, nil)
+      end
+
+      it "reads the canonical upper-cased names" do
+        ENV["APPLE_TEAM_ID"] = "ENVTEAM"
+        ENV["APPLE_PRIVATE_KEY"] = "canonical-pem"
+
+        expect(StandardId.config.apple_team_id).to eq("ENVTEAM")
+        expect(StandardId.config.apple_private_key).to eq("canonical-pem")
+      end
+
+      it "falls back to the deprecated APPLE_PRIVATE_KEY_PEM, warning once" do
+        ENV.delete("APPLE_PRIVATE_KEY")
+        ENV["APPLE_PRIVATE_KEY_PEM"] = "legacy-pem"
+        allow(StandardId.deprecator).to receive(:warn)
+
+        2.times { expect(StandardId.config.apple_private_key).to eq("legacy-pem") }
+        expect(StandardId.deprecator).to have_received(:warn).with(/APPLE_PRIVATE_KEY_PEM is deprecated/).once
+      end
+
+      it "prefers APPLE_PRIVATE_KEY over the deprecated name" do
+        ENV["APPLE_PRIVATE_KEY"] = "canonical-pem"
+        ENV["APPLE_PRIVATE_KEY_PEM"] = "legacy-pem"
+
+        expect(StandardId.config.apple_private_key).to eq("canonical-pem")
+      end
+
+      it "loses to explicit configuration" do
+        ENV["APPLE_PRIVATE_KEY"] = "canonical-pem"
+        StandardId.config.apple_private_key = "explicit-pem"
+
+        expect(StandardId.config.apple_private_key).to eq("explicit-pem")
+      end
+    end
+  end
+
+  def jwk_hash(key, kid)
+    JWT::JWK.new(key).export.merge(kid: kid, alg: "RS256", use: "sig")
+  end
+
+  def generate_test_id_token(sub:, email:, email_verified: nil, is_private_email: nil, aud: nil, exp: nil, nonce: nil)
     payload = {
       iss: "https://appleid.apple.com",
       aud: aud || apple_client_id,
@@ -395,20 +666,14 @@ RSpec.describe StandardId::Providers::Apple do
 
     payload[:email_verified] = email_verified.to_s if email_verified
     payload[:is_private_email] = is_private_email.to_s if is_private_email
+    payload[:nonce] = nonce if nonce
 
     JWT.encode(payload, test_rsa_key, "RS256", kid: test_kid)
   end
 
   def stub_jwks_request
-    jwk = JWT::JWK.new(test_rsa_key)
-    jwk_hash = jwk.export.merge(
-      kid: test_kid,
-      alg: "RS256",
-      use: "sig"
-    )
-
     stub_request(:get, "https://appleid.apple.com/auth/keys")
-      .to_return(status: 200, body: { keys: [jwk_hash] }.to_json)
+      .to_return(status: 200, body: { keys: [jwk_hash(test_rsa_key, test_kid)] }.to_json)
   end
 
   def stub_token_exchange_request(code:, id_token:, client_id: apple_client_id)

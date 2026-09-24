@@ -1,6 +1,6 @@
 # AGENTS.md - AI Agent Guide for standard_id-apple
 
-`standard_id-apple` is a provider plugin for the [StandardId](https://github.com/rarebit-one/standard_id) authentication engine. It packages a `StandardId::Providers::Apple` implementation for Sign in with Apple, and auto-registers itself with the host StandardId installation via a `Rails::Railtie` so apps that bundle the gem don't need an explicit initializer.
+`standard_id-apple` is a provider plugin for the [StandardId](https://github.com/rarebit-one/standard_id) authentication engine. It packages a `StandardId::Providers::Apple` implementation for Sign in with Apple, and auto-registers itself with the host StandardId installation via a Railtie (defined by `StandardId::Providers.plugin_railtie`) so apps that bundle the gem don't need an explicit initializer.
 
 ## Quick Reference
 
@@ -23,14 +23,13 @@ bundle exec rubocop --config .rubocop.yml -A
 ```
 standard_id-apple/
 ├── lib/standard_id/
-│   ├── apple.rb                         # Top-level require entrypoint
+│   ├── apple.rb                         # Entry file; calls plugin_railtie(:apple, ...)
 │   └── apple/
 │       ├── version.rb                   # Gem version constant
-│       ├── railtie.rb                   # Auto-registers provider on after_initialize
 │       └── providers/apple.rb           # StandardId::Providers::Apple implementation
 └── spec/
     ├── spec_helper.rb                   # Boots a minimal Rails app so the Railtie fires
-    └── standard_id/                     # Provider specs
+    └── standard_id/apple/               # Mirrors lib/: providers/apple_spec.rb, registration_spec.rb
 ```
 
 ## Key Patterns
@@ -41,7 +40,7 @@ standard_id-apple/
 
 ### Railtie auto-registration
 
-`StandardId::Apple::Railtie` runs on `config.after_initialize` and calls `StandardId::ProviderRegistry.register(:apple, StandardId::Providers::Apple)`. Host apps just need the gem in their Gemfile — no initializer required.
+The entry file calls `StandardId::Providers.plugin_railtie(:apple, "StandardId::Providers::Apple")` (standard_id >= 0.42), which defines `StandardId::Providers::Railties::Apple`; it runs on `config.after_initialize` and calls `StandardId::ProviderRegistry.register(:apple, ...)`. Host apps just need the gem in their Gemfile — no initializer required.
 
 ### Spec bootstrapping
 
@@ -52,14 +51,13 @@ standard_id-apple/
 | File | Purpose |
 |------|---------|
 | `lib/standard_id/apple.rb` | Top-level require entrypoint |
-| `lib/standard_id/apple/railtie.rb` | Provider registration on Rails boot |
 | `lib/standard_id/apple/providers/apple.rb` | Apple provider implementation |
 | `lib/standard_id/apple/version.rb` | Gem version constant |
 | `standard_id-apple.gemspec` | Gem metadata + runtime deps |
 
 ## Dependencies
 
-- **standard_id** `~> 0.1`, `>= 0.1.7` (parent engine — provides `Providers::Base`, `ProviderRegistry`, errors)
+- **standard_id** `~> 0.42` (parent engine — provides `Providers::Base` and its plugin helpers, `ProviderRegistry`, `HttpClient`, errors)
 - **activesupport** `>= 8.0` (`Time.current`, `present?`/`blank?`, indifferent access)
 - **jwt** `~> 2.7` (id_token decoding, client_secret signing)
 

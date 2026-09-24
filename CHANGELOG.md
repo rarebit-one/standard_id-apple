@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-24
+
+Adopts the provider-plugin API of standard_id 0.42.
+
+### Upgrade
+
+- **Requires `standard_id` 0.42** (`~> 0.42`, was `>= 0.29, < 1.0`). Bump both
+  together.
+- **Rename `APPLE_PRIVATE_KEY_PEM` to `APPLE_PRIVATE_KEY`** when convenient.
+  Initializers from the 0.5.0 generator assign `ENV["APPLE_PRIVATE_KEY_PEM"]`
+  explicitly and keep working unchanged; the old name is also read as a
+  deprecated ENV fallback (see Deprecated).
+- **Expect a boot warning if Apple is half-configured.** With
+  `apple_client_id` set and any of `apple_team_id` / `apple_key_id` /
+  `apple_private_key` blank, standard_id now logs a warning at boot (raises in
+  production under `c.social.provider_misconfiguration = :raise`). sidekick-web
+  can drop the gated `APPLE_PRIVATE_KEY` / `APPLE_KEY_ID` / `APPLE_TEAM_ID`
+  entries in `config/initializers/standard_health.rb` in favour of that
+  setting, or keep them for the health report.
+- **Anyone rescuing on message text:** several messages changed (see Changed).
+  `StandardId::Apple::Railtie` no longer exists.
+
+### Added
+
+- **Required config fields.** `apple_private_key`, `apple_key_id` and
+  `apple_team_id` are declared `required: true`, so
+  `StandardId::Providers::Apple.configuration_errors` and standard_id's boot
+  check report them whenever `apple_client_id` (the enabling field) is set —
+  the two-stage check sidekick-web rebuilt by hand. `apple_mobile_client_id`
+  stays optional: the native `id_token` flow needs no signing key.
+- **ENV fallback** through standard_id 0.42: `APPLE_CLIENT_ID`,
+  `APPLE_MOBILE_CLIENT_ID`, `APPLE_PRIVATE_KEY`, `APPLE_KEY_ID`, `APPLE_TEAM_ID`.
+- **JWKS caching.** Apple's key set is cached in-process for an hour
+  (`JWKS_CACHE_TTL`) instead of being downloaded on every sign-in. A token whose
+  `kid` is not in the cached set triggers one refetch — Apple rotated — no more
+  than once a minute (`JWKS_MIN_REFRESH_INTERVAL`), so tokens with made-up
+  `kid`s cannot make this process hammer Apple. `reset_jwks_cache!` drops it.
+- Specs for `resolve_params`, `skip_csrf?`, `supports_mobile_callback?` /
+  `flow_for`, nonce handling, JWKS caching and configuration, plus standard_id's
+  `"a registered StandardId provider"` shared example.
+
+### Changed
+
+- **The JWKS is fetched through `StandardId::HttpClient`** — 5s open / 10s read
+  timeouts and the private/internal-address guard — instead of a bare
+  `Net::HTTP.get_response` with Ruby's default 60s timeouts. HttpClient has no
+  public plain GET, so this calls its `validate_url!` / `start_connection`
+  directly; CI's compat job catches it if those change.
+- **Nonce mismatches no longer leak the nonce.** The message was
+  `ID token nonce mismatch. Expected: <nonce>, got: <nonce>`; it is now
+  standard_id's `ID token nonce mismatch`, and the comparison is constant-time.
+- **The duplicated helpers are gone** in favour of standard_id's
+  `Providers::Base`: `rescue_to_oauth_error`, `verify_nonce!`,
+  `build_authorization_url`, `extract_tokens` (the private
+  `extract_token_payload` is removed). `lib/standard_id/apple/railtie.rb` is
+  replaced by `StandardId::Providers.plugin_railtie(:apple, ...)`.
+- **Error messages**, now consistently Apple-prefixed and never echoing a `kid`
+  or nonce:
+  - `Either code or id_token must be provided` → `Apple sign-in requires a code or an id_token`
+  - `Access token login flow is not supported for Apple` → `Apple sign-in does not support the access token flow`
+  - `Missing authorization code` → `Apple authorization code is missing`
+  - `Missing id_token` → `Apple id_token is missing`
+  - `Apple response missing id_token` → `Apple token response is missing id_token`
+  - `Apple OAuth credentials are incomplete` → `... are incomplete: <fields> not set`
+  - `Failed to exchange Apple authorization code: <error>` now falls back to
+    `HTTP <status>` when Apple's body names no error (it printed nothing).
+  - `JWK with kid '<kid>' not found in Apple's JWKS` → `Invalid Apple ID token: signing key not found in Apple's JWKS`
+  - `Failed to fetch JWK: ...` → `Failed to fetch Apple JWKS: ...`. A non-2xx
+    JWKS response is now `StandardId::OAuthError` (an upstream failure) rather
+    than `InvalidRequestError`.
+- Install generator and README use the canonical `APPLE_PRIVATE_KEY`, and
+  document the ENV fallback, required fields and flows.
+
+### Deprecated
+
+- **`APPLE_PRIVATE_KEY_PEM`** as an ENV source for `apple_private_key`. Read only
+  when the field is never assigned and `APPLE_PRIVATE_KEY` is unset, with one
+  warning per process through `StandardId.deprecator`.
+
+### Removed
+
+- `StandardId::Apple::Railtie` (replaced by the Railtie `plugin_railtie`
+  defines, `StandardId::Providers::Railties::Apple`).
+
 ## [0.5.0] - 2026-07-31
 
 ### Added
