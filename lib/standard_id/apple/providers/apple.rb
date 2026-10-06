@@ -2,6 +2,7 @@ require "json"
 require "jwt"
 require "net/http"
 require "openssl"
+require "standard_id/apple/errors"
 
 module StandardId
   module Providers
@@ -10,6 +11,8 @@ module StandardId
       AUTH_ENDPOINT = "#{ISSUER}/auth/authorize".freeze
       TOKEN_ENDPOINT = "#{ISSUER}/auth/token".freeze
       JWKS_URI = "#{ISSUER}/auth/keys".freeze
+      REVOKE_ENDPOINT = "#{ISSUER}/auth/revoke".freeze
+      TOKEN_TYPE_HINTS = %w[refresh_token access_token].freeze
       DEFAULT_SCOPE = "name email".freeze
       DEFAULT_RESPONSE_MODE = "form_post".freeze
       AUTHORIZATION_PARAM_DEFAULTS = {
@@ -180,6 +183,93 @@ module StandardId
           end
         end
 
+        # Exchange an authorization code for the user's Apple tokens, and
+        # verify the returned id_token.
+        #
+        # The building block for token revocation (App Store Guideline
+        # 5.1.1(v)): an app that only ever sent identity tokens holds nothing
+        # it can revoke, so at account deletion it obtains a fresh
+        # authorization code, the server exchanges it here, then calls
+        # {revoke} with the refresh token.
+        #
+        # Apple's contract (POST https://appleid.apple.com/auth/token, form
+        # encoded; checked 2026-10-06 against
+        # https://developer.apple.com/documentation/signinwithapplerestapi/generate-and-validate-tokens):
+        # the code is single-use and valid for five minutes; `redirect_uri` is
+        # sent only if the original authorization request had one, which a
+        # native (AuthenticationServices) authorization does not.
+        #
+        # @param code [String] the authorization code
+        # @param client_id [String] the identifier the code was issued to: the
+        #   app's bundle ID (apple_mobile_client_id) for a native code, the
+        #   Services ID (apple_client_id, the default) for a web code
+        # @param redirect_uri [String, nil] only for codes from a web flow
+        # @return [ActiveSupport::HashWithIndifferentAccess] `user_info`
+        #   (verified id_token claims: sub, email, ...) and `tokens`
+        #   (access_token, refresh_token, id_token)
+        # @raise [StandardId::Apple::CredentialsMissingError] signing
+        #   credentials or client_id not configured
+        # @raise [StandardId::Apple::TokenRequestError] Apple rejected the
+        #   code (see #invalid_grant?), returned an error, could not be
+        #   reached (see #retryable?), or returned an id_token that failed
+        #   verification
+        # @raise [StandardId::InvalidRequestError] code is blank
+        def exchange_authorization_code(code, client_id: StandardId.config.apple_client_id, redirect_uri: nil)
+          raise StandardId::InvalidRequestError, "Apple authorization code is missing" if code.blank?
+
+          ensure_full_credentials!(client_id: client_id)
+
+          params = {
+            client_id: client_id,
+            client_secret: signed_client_secret(client_id),
+            code: code.to_s,
+            grant_type: "authorization_code"
+          }
+          params[:redirect_uri] = redirect_uri if redirect_uri.present?
+
+          response = post_to_apple(TOKEN_ENDPOINT, params, failure: "Failed to exchange Apple authorization code")
+          parsed = parse_token_response(response)
+
+          build_response(verified_claims(parsed["id_token"], client_id), tokens: extract_tokens(parsed))
+        end
+
+        # Revoke a user's Apple refresh or access token, ending the user's
+        # Sign in with Apple session for this app.
+        #
+        # Apple's contract (POST https://appleid.apple.com/auth/revoke, form
+        # encoded; checked 2026-10-06 against
+        # https://developer.apple.com/documentation/signinwithapplerestapi/revoke-tokens):
+        # 200 with no body when the token is revoked *or was already invalid*,
+        # 400 with an ErrorResponse otherwise. Revoking the refresh token is
+        # the one that matters; an access token expires within the hour.
+        #
+        # @param token [String] the refresh token (preferred) or access token
+        # @param token_type_hint [String, Symbol, nil] "refresh_token" or
+        #   "access_token"
+        # @param client_id [String] the identifier the token was issued to
+        #   (the same one used for {exchange_authorization_code})
+        # @return [true]
+        # @raise [StandardId::Apple::CredentialsMissingError]
+        # @raise [StandardId::Apple::TokenRequestError]
+        # @raise [StandardId::InvalidRequestError] token blank or hint unknown
+        def revoke(token:, token_type_hint: nil, client_id: StandardId.config.apple_client_id)
+          raise StandardId::InvalidRequestError, "Apple token to revoke is missing" if token.blank?
+
+          hint = token_type_hint&.to_s
+          if hint && !TOKEN_TYPE_HINTS.include?(hint)
+            raise StandardId::InvalidRequestError,
+                  "Unsupported Apple token_type_hint (expected #{TOKEN_TYPE_HINTS.join(' or ')})"
+          end
+
+          ensure_full_credentials!(client_id: client_id)
+
+          params = { client_id: client_id, client_secret: signed_client_secret(client_id), token: token.to_s }
+          params[:token_type_hint] = hint if hint
+
+          post_to_apple(REVOKE_ENDPOINT, params, failure: "Failed to revoke Apple token")
+          true
+        end
+
         # Drop the in-process JWKS cache (tests, or after a known rotation).
         def reset_jwks_cache!
           @jwks_mutex.synchronize { @jwks_cache = nil }
@@ -190,7 +280,7 @@ module StandardId
         def ensure_basic_credentials!(client_id: StandardId.config.apple_client_id)
           return if client_id.present?
 
-          raise StandardId::InvalidRequestError, "Apple OAuth is not configured"
+          raise StandardId::Apple::CredentialsMissingError, "Apple OAuth is not configured"
         end
 
         # The same fields StandardId's boot check reports (required_config_fields),
@@ -203,7 +293,7 @@ module StandardId
           missing = required_config_fields.select { |field| config_value(field).blank? }
           return if missing.empty?
 
-          raise StandardId::InvalidRequestError,
+          raise StandardId::Apple::CredentialsMissingError,
                 "Apple OAuth credentials are incomplete: #{missing.join(', ')} not set"
         end
 
@@ -223,6 +313,66 @@ module StandardId
 
           private_key = OpenSSL::PKey::EC.new(StandardId.config.apple_private_key)
           JWT.encode(payload, private_key, "ES256", header)
+        end
+
+        # generate_client_secret for the token helpers: an unreadable private
+        # key is a configuration error, reported without the key material.
+        def signed_client_secret(client_id)
+          generate_client_secret(client_id: client_id)
+        rescue OpenSSL::PKey::PKeyError, ArgumentError
+          raise StandardId::Apple::CredentialsMissingError, "Apple OAuth credentials are invalid: apple_private_key could not be loaded"
+        end
+
+        # POST a form to Apple, raising TokenRequestError on a non-2xx response
+        # or a transport failure. Messages carry Apple's `error` value, the
+        # HTTP status or the exception class — never the request parameters,
+        # which hold the code/token and the client secret.
+        def post_to_apple(endpoint, params, failure:)
+          response = begin
+            HttpClient.post_form(endpoint, params)
+          rescue Timeout::Error, IOError, SocketError, SystemCallError, OpenSSL::SSL::SSLError, HttpClient::SsrfError => e
+            raise StandardId::Apple::TokenRequestError, "#{failure}: #{e.class.name}"
+          end
+          return response if response.is_a?(Net::HTTPSuccess)
+
+          reason = apple_error_value(response)
+          raise StandardId::Apple::TokenRequestError.new(
+            "#{failure}: #{reason || "HTTP #{response.code}"}",
+            reason: reason,
+            http_status_code: response.code.to_i
+          )
+        end
+
+        def parse_token_response(response)
+          parsed = JSON.parse(response.body.to_s)
+          raise JSON::ParserError, "not an object" unless parsed.is_a?(Hash)
+
+          parsed
+        rescue JSON::ParserError
+          raise StandardId::Apple::TokenRequestError.new(
+            "Apple token response is not valid JSON",
+            reason: "invalid_response",
+            http_status_code: response.code.to_i
+          )
+        end
+
+        # Verify the id_token from a token response. Any failure is reported as
+        # a TokenRequestError with no HTTP status (so #retryable? is true): the
+        # realistic cause is a failed JWKS fetch, not a bad token from Apple.
+        def verified_claims(id_token, client_id)
+          if id_token.blank?
+            raise StandardId::Apple::TokenRequestError.new(
+              "Apple token response is missing id_token", reason: "invalid_response", http_status_code: 200
+            )
+          end
+
+          verify_id_token(id_token: id_token, client_id: client_id)
+        rescue StandardId::Apple::TokenRequestError
+          raise
+        rescue StandardId::OAuthError => e
+          raise StandardId::Apple::TokenRequestError.new(
+            "Apple id_token from the token response failed verification: #{e.message}", reason: "invalid_id_token"
+          )
         end
 
         # Look `kid` up in Apple's JWKS, served from an in-process cache
@@ -276,11 +426,16 @@ module StandardId
         end
 
         def error_reason(response)
+          apple_error_value(response) || "HTTP #{response.code}"
+        end
+
+        # Apple's ErrorResponse `error` value, or nil.
+        def apple_error_value(response)
           body = JSON.parse(response.body.to_s)
           reason = body["error"] if body.is_a?(Hash)
-          reason.presence || "HTTP #{response.code}"
+          reason.is_a?(String) ? reason.presence : nil
         rescue JSON::ParserError
-          "HTTP #{response.code}"
+          nil
         end
 
         def legacy_private_key_from_env

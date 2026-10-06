@@ -107,6 +107,30 @@ Apple's signing keys (JWKS) are fetched through `StandardId::HttpClient`
 (timeouts, private-address guard) and cached in-process for an hour; a token
 signed with an unknown key triggers one early refetch, at most once a minute.
 
+### Token revocation (account deletion)
+
+App Store Guideline 5.1.1(v) requires an app offering Sign in with Apple to
+revoke the user's Apple tokens when their account is deleted. A native app
+that only sends identity tokens leaves the server nothing to revoke, so have
+the app obtain a fresh authorization code at deletion and send it along:
+
+```ruby
+apple = StandardId::Providers::Apple
+client_id = StandardId.config.apple_mobile_client_id # the code's audience
+
+result = apple.exchange_authorization_code(code, client_id: client_id)
+result[:user_info][:sub] # verified; check it matches the account being deleted
+apple.revoke(token: result[:tokens][:refresh_token], token_type_hint: "refresh_token", client_id: client_id)
+```
+
+Both need the signing key (`apple_team_id`, `apple_key_id`,
+`apple_private_key`). Failures raise `StandardId::Apple::TokenRequestError`
+(`#reason` is Apple's `error` value, `#invalid_grant?` means the code is
+expired or used — get a new one; `#retryable?` covers timeouts, 429 and 5xx)
+or `StandardId::Apple::CredentialsMissingError`. Both subclass
+`StandardId::InvalidRequestError`, and no message contains a code, token or
+client secret.
+
 ### Two corrections to earlier versions of this section
 
 **The `social.` prefix.** This section previously showed the flat form
