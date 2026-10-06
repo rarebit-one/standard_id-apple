@@ -7,8 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-06
+
+### Added
+
+- **Token revocation helpers** for App Store Guideline 5.1.1(v) (revoke a
+  user's Apple tokens when their account is deleted):
+  - `StandardId::Providers::Apple.exchange_authorization_code(code, client_id:, redirect_uri: nil)`
+    — exchanges an authorization code at `/auth/token` and verifies the
+    returned id_token; returns `user_info` and `tokens`. `redirect_uri` is sent
+    only when given (native codes have none).
+  - `StandardId::Providers::Apple.revoke(token:, token_type_hint: nil, client_id:)`
+    — calls `/auth/revoke` with a `refresh_token` or `access_token`.
+  - Checked against Apple's REST docs on 2026-10-06
+    (`signinwithapplerestapi/generate-and-validate-tokens`, `.../revoke-tokens`).
+- **`StandardId::Apple::TokenRequestError`** (`#reason`, `#http_status_code`,
+  `#retryable?`, `#invalid_grant?`) and
+  **`StandardId::Apple::CredentialsMissingError`**, both subclasses of
+  `StandardId::InvalidRequestError`. Messages carry Apple's `error` value, the
+  HTTP status or the exception class, never a code, token or client secret.
+
 ### Changed
 
+- The "Apple OAuth is not configured" / "credentials are incomplete" errors
+  are now `StandardId::Apple::CredentialsMissingError` (a subclass of the
+  `StandardId::InvalidRequestError` they were before; messages unchanged).
 - **Requires Rails 8.1** (`activesupport >= 8.1`, was `>= 8.0`). Every
   consumer app already runs 8.1; 8.0 was never exercised in CI.
 

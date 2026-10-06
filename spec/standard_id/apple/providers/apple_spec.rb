@@ -650,6 +650,235 @@ RSpec.describe StandardId::Providers::Apple do
     end
   end
 
+  describe ".exchange_authorization_code" do
+    let(:code) { "native_authorization_code" }
+    let(:mobile_client_id) { "com.example.mobileapp" }
+    let(:user_sub) { "001234.abcd1234abcd1234abcd1234abcd1234.1234" }
+
+    before { stub_jwks_request }
+
+    it "exchanges the code and returns the verified claims and tokens" do
+      id_token = generate_test_id_token(sub: user_sub, email: "u@example.com", aud: mobile_client_id)
+      stub_token_exchange_request(code: code, id_token: id_token, client_id: mobile_client_id)
+
+      result = described_class.exchange_authorization_code(code, client_id: mobile_client_id)
+
+      expect(result[:user_info][:sub]).to eq(user_sub)
+      expect(result[:tokens]).to include(access_token: "test_access_token", refresh_token: "test_refresh_token", id_token: id_token)
+    end
+
+    it "signs the client_secret with the configured key, for the given client_id" do
+      id_token = generate_test_id_token(sub: user_sub, email: "u@example.com", aud: mobile_client_id)
+      stub_token_exchange_request(code: code, id_token: id_token, client_id: mobile_client_id)
+      public_key = OpenSSL::PKey::EC.new(apple_private_key)
+
+      described_class.exchange_authorization_code(code, client_id: mobile_client_id)
+
+      expect(WebMock).to(have_requested(:post, "https://appleid.apple.com/auth/token").with do |req|
+        body = URI.decode_www_form(req.body).to_h
+        payload, header = JWT.decode(body["client_secret"], public_key, true, algorithms: ["ES256"])
+        expect(header).to include("alg" => "ES256", "kid" => apple_key_id)
+        expect(payload).to include("iss" => apple_team_id, "sub" => mobile_client_id, "aud" => "https://appleid.apple.com")
+        true
+      end)
+    end
+
+    it "omits redirect_uri unless one is given (native codes have none)" do
+      id_token = generate_test_id_token(sub: user_sub, email: "u@example.com", aud: mobile_client_id)
+      stub_token_exchange_request(code: code, id_token: id_token, client_id: mobile_client_id)
+
+      described_class.exchange_authorization_code(code, client_id: mobile_client_id)
+
+      expect(WebMock).to(have_requested(:post, "https://appleid.apple.com/auth/token").with do |req|
+        !URI.decode_www_form(req.body).to_h.key?("redirect_uri")
+      end)
+    end
+
+    it "sends redirect_uri for a web code" do
+      id_token = generate_test_id_token(sub: user_sub, email: "u@example.com")
+      stub_token_exchange_request(code: code, id_token: id_token)
+
+      described_class.exchange_authorization_code(code, redirect_uri: "https://example.com/cb")
+
+      expect(WebMock).to(have_requested(:post, "https://appleid.apple.com/auth/token").with do |req|
+        URI.decode_www_form(req.body).to_h["redirect_uri"] == "https://example.com/cb"
+      end)
+    end
+
+    it "raises an invalid_grant TokenRequestError when Apple rejects the code" do
+      stub_request(:post, "https://appleid.apple.com/auth/token")
+        .to_return(status: 400, body: { error: "invalid_grant" }.to_json)
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError) { |error|
+          expect(error).to be_invalid_grant
+          expect(error).not_to be_retryable
+          expect(error.http_status_code).to eq(400)
+          expect(error.message).to eq("Failed to exchange Apple authorization code: invalid_grant")
+          expect(error.message).not_to include(code)
+        }
+    end
+
+    it "raises a retryable TokenRequestError on an Apple 5xx" do
+      stub_request(:post, "https://appleid.apple.com/auth/token").to_return(status: 503, body: "")
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError, /HTTP 503/) { |error| expect(error).to be_retryable }
+    end
+
+    it "raises a retryable TokenRequestError on a timeout, naming only the exception class" do
+      stub_request(:post, "https://appleid.apple.com/auth/token").to_timeout
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError) { |error|
+          expect(error).to be_retryable
+          expect(error.http_status_code).to be_nil
+          expect(error.message).to match(/Failed to exchange Apple authorization code: Net::OpenTimeout/)
+        }
+    end
+
+    it "raises when the response has no id_token" do
+      stub_request(:post, "https://appleid.apple.com/auth/token")
+        .to_return(status: 200, body: { access_token: "a", refresh_token: "r" }.to_json)
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError, /missing id_token/) { |error| expect(error).not_to be_retryable }
+    end
+
+    it "raises when the response is not JSON" do
+      stub_request(:post, "https://appleid.apple.com/auth/token").to_return(status: 200, body: "<html>")
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError, /not valid JSON/)
+    end
+
+    it "raises when the id_token was issued to another client" do
+      id_token = generate_test_id_token(sub: user_sub, email: "u@example.com", aud: "com.someone.else")
+      stub_token_exchange_request(code: code, id_token: id_token, client_id: mobile_client_id)
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError, /failed verification/) { |error|
+          expect(error.reason).to eq("invalid_id_token")
+        }
+    end
+
+    it "rejects a blank code without calling Apple" do
+      expect { described_class.exchange_authorization_code("", client_id: mobile_client_id) }
+        .to raise_error(StandardId::InvalidRequestError, /code is missing/)
+      expect(WebMock).not_to have_requested(:post, "https://appleid.apple.com/auth/token")
+    end
+
+    it "raises CredentialsMissingError without calling Apple when the signing key is not set" do
+      StandardId.config.apple_private_key = nil
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::CredentialsMissingError, /apple_private_key not set/)
+      expect(WebMock).not_to have_requested(:post, "https://appleid.apple.com/auth/token")
+    end
+
+    it "raises CredentialsMissingError, without the key material, when the key is unreadable" do
+      StandardId.config.apple_private_key = "not-a-pem"
+
+      expect { described_class.exchange_authorization_code(code, client_id: mobile_client_id) }
+        .to raise_error(StandardId::Apple::CredentialsMissingError) { |error|
+          expect(error.message).to eq("Apple OAuth credentials are invalid: apple_private_key could not be loaded")
+        }
+    end
+
+    it "keeps the new errors catchable as StandardId::InvalidRequestError" do
+      expect(StandardId::Apple::TokenRequestError).to be < StandardId::InvalidRequestError
+      expect(StandardId::Apple::CredentialsMissingError).to be < StandardId::InvalidRequestError
+    end
+  end
+
+  describe ".revoke" do
+    let(:client_id) { "com.example.mobileapp" }
+
+    def stub_revoke(status: 200, body: "")
+      stub_request(:post, "https://appleid.apple.com/auth/revoke").to_return(status: status, body: body)
+    end
+
+    it "posts the token, hint and a signed client_secret to Apple's revoke endpoint" do
+      stub_revoke
+
+      expect(described_class.revoke(token: "refresh-123", token_type_hint: :refresh_token, client_id: client_id)).to be(true)
+
+      expect(WebMock).to(have_requested(:post, "https://appleid.apple.com/auth/revoke").with do |req|
+        body = URI.decode_www_form(req.body).to_h
+        expect(body).to include("client_id" => client_id, "token" => "refresh-123", "token_type_hint" => "refresh_token")
+        expect(JWT.decode(body["client_secret"], nil, false)[0]).to include("sub" => client_id, "iss" => apple_team_id)
+        true
+      end)
+    end
+
+    it "omits token_type_hint when none is given" do
+      stub_revoke
+
+      described_class.revoke(token: "access-123", client_id: client_id)
+
+      expect(WebMock).to(have_requested(:post, "https://appleid.apple.com/auth/revoke").with do |req|
+        !URI.decode_www_form(req.body).to_h.key?("token_type_hint")
+      end)
+    end
+
+    it "defaults client_id to apple_client_id" do
+      stub_revoke
+
+      described_class.revoke(token: "refresh-123", token_type_hint: "refresh_token")
+
+      expect(WebMock).to(have_requested(:post, "https://appleid.apple.com/auth/revoke").with do |req|
+        URI.decode_www_form(req.body).to_h["client_id"] == apple_client_id
+      end)
+    end
+
+    it "raises a TokenRequestError naming Apple's error, not the token" do
+      stub_revoke(status: 400, body: { error: "invalid_client" }.to_json)
+
+      expect { described_class.revoke(token: "refresh-123", token_type_hint: "refresh_token", client_id: client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError) { |error|
+          expect(error.reason).to eq("invalid_client")
+          expect(error).not_to be_retryable
+          expect(error.message).to eq("Failed to revoke Apple token: invalid_client")
+        }
+    end
+
+    it "raises a retryable TokenRequestError when Apple is unreachable" do
+      stub_request(:post, "https://appleid.apple.com/auth/revoke").to_raise(Errno::ECONNREFUSED)
+
+      expect { described_class.revoke(token: "refresh-123", client_id: client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError, /Errno::ECONNREFUSED/) { |error|
+          expect(error).to be_retryable
+          expect(error.cause).to be_a(Errno::ECONNREFUSED)
+        }
+    end
+
+    it "treats 429 as retryable" do
+      stub_revoke(status: 429)
+
+      expect { described_class.revoke(token: "refresh-123", client_id: client_id) }
+        .to raise_error(StandardId::Apple::TokenRequestError) { |error| expect(error).to be_retryable }
+    end
+
+    it "rejects an unknown token_type_hint without calling Apple" do
+      expect { described_class.revoke(token: "refresh-123", token_type_hint: "id_token", client_id: client_id) }
+        .to raise_error(StandardId::InvalidRequestError, /Unsupported Apple token_type_hint/)
+      expect(WebMock).not_to have_requested(:post, "https://appleid.apple.com/auth/revoke")
+    end
+
+    it "rejects a blank token without calling Apple" do
+      expect { described_class.revoke(token: nil, client_id: client_id) }
+        .to raise_error(StandardId::InvalidRequestError, /token to revoke is missing/)
+      expect(WebMock).not_to have_requested(:post, "https://appleid.apple.com/auth/revoke")
+    end
+
+    it "raises CredentialsMissingError when the team id is not set" do
+      StandardId.config.apple_team_id = nil
+
+      expect { described_class.revoke(token: "refresh-123", client_id: client_id) }
+        .to raise_error(StandardId::Apple::CredentialsMissingError, /apple_team_id not set/)
+    end
+  end
+
   def jwk_hash(key, kid)
     JWT::JWK.new(key).export.merge(kid: kid, alg: "RS256", use: "sig")
   end
