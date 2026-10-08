@@ -49,7 +49,7 @@ RSpec.describe StandardId::Apple::Generators::InstallGenerator do
 
     expect(content).to include("StandardId.configure")
     %w[
-      apple_client_id apple_mobile_client_id apple_team_id
+      apple_client_id apple_mobile_client_id apple_redirect_uri apple_team_id
       apple_key_id apple_private_key
     ].each do |field|
       expect(content).to include("config.social.#{field}")
@@ -60,7 +60,7 @@ RSpec.describe StandardId::Apple::Generators::InstallGenerator do
     run_generator
     content = File.read(initializer_path)
 
-    %w[APPLE_CLIENT_ID APPLE_MOBILE_CLIENT_ID APPLE_TEAM_ID APPLE_KEY_ID APPLE_PRIVATE_KEY].each do |name|
+    %w[APPLE_CLIENT_ID APPLE_MOBILE_CLIENT_ID APPLE_REDIRECT_URI APPLE_TEAM_ID APPLE_KEY_ID APPLE_PRIVATE_KEY].each do |name|
       expect(content).to include(%(ENV["#{name}"]))
     end
     expect(content).not_to include(%(ENV["APPLE_PRIVATE_KEY_PEM"]))

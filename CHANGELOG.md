@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-08
+
+### Added
+
+- **`apple_redirect_uri`** (optional, ENV fallback `APPLE_REDIRECT_URI`): the
+  return URL web-flow codes are authorized against when the caller exchanges
+  them without one — normally `https://<host>/auth/callback_mobile/apple`,
+  registered on the Services ID.
+
+### Fixed
+
+- **`flow=web` code exchanges through the API callback** (e.g. Android signing
+  in through Apple's web flow) sent no `redirect_uri` to Apple's token
+  endpoint, so Apple rejected them with `invalid_grant`. `resolve_params` now
+  fills the configured `apple_redirect_uri` for the web flow when the caller
+  passed none. A caller's `redirect_uri` (the browser callback's) still wins,
+  and the native flow is unchanged. No-op until `apple_redirect_uri` is set.
+
 ## [0.7.0] - 2026-10-06
 
 ### Added

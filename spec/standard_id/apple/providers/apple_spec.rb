@@ -571,6 +571,68 @@ RSpec.describe StandardId::Providers::Apple do
     it "uses the bundle ID for the mobile flow" do
       expect(described_class.resolve_params({ id_token: "t" }, context: { flow: :mobile })[:client_id]).to eq("com.example.mobileapp")
     end
+
+    context "with apple_redirect_uri configured" do
+      let(:configured_redirect_uri) { "https://example.com/auth/callback_mobile/apple" }
+
+      before { StandardId.config.apple_redirect_uri = configured_redirect_uri }
+      after { StandardId.config.apple_redirect_uri = nil }
+
+      it "fills the redirect_uri of a web-flow exchange that has none" do
+        resolved = described_class.resolve_params({ code: "c", redirect_uri: nil }, context: { flow: :web })
+
+        expect(resolved).to eq(code: "c", client_id: apple_client_id, redirect_uri: configured_redirect_uri)
+      end
+
+      it "fills it when the flow is not given (web is the default)" do
+        expect(described_class.resolve_params({ code: "c" })[:redirect_uri]).to eq(configured_redirect_uri)
+      end
+
+      it "keeps a redirect_uri the caller passed" do
+        resolved = described_class.resolve_params(
+          { code: "c", redirect_uri: "https://example.com/auth/callback/apple" }, context: { flow: :web }
+        )
+
+        expect(resolved[:redirect_uri]).to eq("https://example.com/auth/callback/apple")
+      end
+
+      it "never adds one to the mobile flow" do
+        resolved = described_class.resolve_params({ code: "c", redirect_uri: nil }, context: { flow: :mobile })
+
+        expect(resolved[:redirect_uri]).to be_nil
+      end
+    end
+
+    it "leaves redirect_uri alone when apple_redirect_uri is not configured" do
+      expect(described_class.resolve_params({ code: "c", redirect_uri: nil }, context: { flow: :web })[:redirect_uri]).to be_nil
+    end
+  end
+
+  describe "web-flow code exchange without a caller redirect_uri" do
+    let(:configured_redirect_uri) { "https://example.com/auth/callback_mobile/apple" }
+    let(:user_sub) { "001234.abcdef" }
+    let(:user_email) { "user@example.com" }
+
+    before do
+      StandardId.config.apple_redirect_uri = configured_redirect_uri
+      stub_jwks_request
+    end
+
+    after { StandardId.config.apple_redirect_uri = nil }
+
+    # The API callback's flow=web path: resolve_params, then get_user_info,
+    # as StandardId::SocialAuthentication#get_user_info_from_provider does.
+    it "sends the configured redirect_uri to Apple's token endpoint" do
+      token_request = stub_request(:post, described_class::TOKEN_ENDPOINT)
+                      .with(body: hash_including("redirect_uri" => configured_redirect_uri, "client_id" => apple_client_id))
+                      .to_return(status: 200, body: { id_token: generate_test_id_token(sub: user_sub, email: user_email) }.to_json)
+
+      params = described_class.resolve_params({ code: "web-code", redirect_uri: nil }, context: { flow: :web })
+      result = described_class.get_user_info(**params.compact)
+
+      expect(token_request).to have_been_requested
+      expect(result[:user_info]["sub"]).to eq(user_sub)
+    end
   end
 
   describe "configuration" do
