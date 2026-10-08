@@ -2,7 +2,7 @@
 
 # Apple Sign In credentials for StandardId.
 #
-# These five fields are declared by the standard_id-apple gem, NOT by
+# These six fields are declared by the standard_id-apple gem, NOT by
 # standard_id — they do not exist unless this gem is in the Gemfile, on any
 # standard_id version. Removing the gem and leaving this file behind raises
 # `StandardId::ConfigurationError: Unknown field 'apple_client_id' for scope
@@ -15,10 +15,10 @@
 #
 # ENV: on standard_id >= 0.42 a field this file does not assign falls back to
 # the ENV variable named after it, upper-cased — APPLE_CLIENT_ID,
-# APPLE_MOBILE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY — which
-# are the names used below. The assignments are kept so the wiring is visible;
-# delete any you prefer to leave to the fallback, or point one at another
-# source (e.g. Rails credentials).
+# APPLE_MOBILE_CLIENT_ID, APPLE_REDIRECT_URI, APPLE_TEAM_ID, APPLE_KEY_ID,
+# APPLE_PRIVATE_KEY — which are the names used below. The assignments are kept
+# so the wiring is visible; delete any you prefer to leave to the fallback, or
+# point one at another source (e.g. Rails credentials).
 #
 # apple_client_id switches the web flow on. While it is set, StandardId's boot
 # check requires apple_team_id, apple_key_id and apple_private_key (warns by
@@ -31,6 +31,12 @@ StandardId.configure do |config|
   # backend. Its audience differs from the web Services ID, so leaving it nil
   # on a web-only app is correct — don't point it at APPLE_CLIENT_ID.
   config.social.apple_mobile_client_id = ENV["APPLE_MOBILE_CLIENT_ID"]
+
+  # Optional: the return URL web-flow codes exchanged through the API callback
+  # (`flow=web`, e.g. Android) were authorized against — normally
+  # https://<host>/auth/callback_mobile/apple, registered on the Services ID.
+  # Apple rejects the exchange (invalid_grant) without it.
+  config.social.apple_redirect_uri = ENV["APPLE_REDIRECT_URI"]
 
   config.social.apple_team_id = ENV["APPLE_TEAM_ID"]
   config.social.apple_key_id = ENV["APPLE_KEY_ID"]

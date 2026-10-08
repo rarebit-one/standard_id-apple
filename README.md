@@ -45,6 +45,7 @@ configuration block, in the `social` scope:
 StandardId.configure do |config|
   config.social.apple_client_id = ENV["APPLE_CLIENT_ID"]
   config.social.apple_mobile_client_id = ENV["APPLE_MOBILE_CLIENT_ID"] # optional
+  config.social.apple_redirect_uri = ENV["APPLE_REDIRECT_URI"] # optional, see Flows
   config.social.apple_team_id = ENV["APPLE_TEAM_ID"]
   config.social.apple_key_id = ENV["APPLE_KEY_ID"]
   config.social.apple_private_key = ENV["APPLE_PRIVATE_KEY"]
@@ -62,6 +63,7 @@ variable named after it, upper-cased:
 |---|---|
 | `apple_client_id` | `APPLE_CLIENT_ID` |
 | `apple_mobile_client_id` | `APPLE_MOBILE_CLIENT_ID` |
+| `apple_redirect_uri` | `APPLE_REDIRECT_URI` |
 | `apple_team_id` | `APPLE_TEAM_ID` |
 | `apple_key_id` | `APPLE_KEY_ID` |
 | `apple_private_key` | `APPLE_PRIVATE_KEY` (deprecated fallback: `APPLE_PRIVATE_KEY_PEM`) |
@@ -102,6 +104,14 @@ UI while its native sign-in keeps working.
 | Web (`/auth/callback/apple`, form_post, CSRF skipped) | `apple_client_id` | yes |
 | Native `id_token` (`/api/oauth/callback/apple`) | `apple_mobile_client_id` | no |
 | Web flow on Android etc. (`flow=web` on the API callback, redirects back into the app) | `apple_client_id` | yes |
+
+Apple only exchanges a web-flow code when the token request carries the same
+`redirect_uri` the authorization used. The browser callback passes its own
+URL. The API callback passes none, so for `flow=web` there set
+`apple_redirect_uri` to the return URL those codes are authorized against,
+normally the mobile bounce `https://<host>/auth/callback_mobile/apple`
+(registered on the Services ID). A `redirect_uri` the caller passes always
+wins, and the native flow never sends one.
 
 Apple's signing keys (JWKS) are fetched through `StandardId::HttpClient`
 (timeouts, private-address guard) and cached in-process for an hour; a token

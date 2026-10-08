@@ -85,11 +85,16 @@ module StandardId
         #
         # ENV fallbacks (standard_id >= 0.42) use the upper-cased field names:
         # APPLE_CLIENT_ID, APPLE_MOBILE_CLIENT_ID, APPLE_PRIVATE_KEY,
-        # APPLE_KEY_ID, APPLE_TEAM_ID.
+        # APPLE_KEY_ID, APPLE_TEAM_ID, APPLE_REDIRECT_URI.
+        #
+        # `apple_redirect_uri` is optional: the return URL a web-flow code
+        # was issued against, for callers that exchange the code without
+        # passing one (see #resolve_params).
         def config_schema
           {
             apple_client_id: { type: :string, default: nil },
             apple_mobile_client_id: { type: :string, default: nil },
+            apple_redirect_uri: { type: :string, default: nil },
             apple_private_key: { type: :string, default: -> { legacy_private_key_from_env }, required: true },
             apple_key_id: { type: :string, default: nil, required: true },
             apple_team_id: { type: :string, default: nil, required: true }
@@ -113,11 +118,24 @@ module StandardId
 
         # The web flow authenticates against the Services ID, the native flow
         # against the app's bundle ID.
+        #
+        # A web-flow code must be exchanged with the redirect_uri it was
+        # authorized against, or Apple answers invalid_grant. The browser
+        # callback passes its own URL. The API callback (`flow=web`, e.g.
+        # Android signing in through Apple's web flow and bouncing back via
+        # `/auth/callback_mobile/apple`) passes none, so the configured
+        # `apple_redirect_uri` fills the gap. A redirect_uri the caller did
+        # pass always wins; the native flow never gets one.
         def resolve_params(params, context: {})
           flow = context[:flow] || :web
-          client_id = flow == :mobile ? StandardId.config.apple_mobile_client_id : StandardId.config.apple_client_id
+          return params.merge(client_id: StandardId.config.apple_mobile_client_id) if flow == :mobile
 
-          params.merge(client_id: client_id)
+          resolved = params.merge(client_id: StandardId.config.apple_client_id)
+          configured_redirect_uri = StandardId.config.apple_redirect_uri
+          if resolved[:redirect_uri].blank? && configured_redirect_uri.present?
+            resolved[:redirect_uri] = configured_redirect_uri
+          end
+          resolved
         end
 
         def exchange_code_for_user_info(code:, redirect_uri:, client_id: StandardId.config.apple_client_id, nonce: nil)

@@ -12,7 +12,7 @@ RSpec.describe "standard_id-apple registration" do
 
   it "declares every field on the social scope" do
     expect(:apple).to be_a_registered_standard_id_provider.with_config_fields(
-      :apple_client_id, :apple_mobile_client_id, :apple_private_key, :apple_key_id, :apple_team_id
+      :apple_client_id, :apple_mobile_client_id, :apple_redirect_uri, :apple_private_key, :apple_key_id, :apple_team_id
     )
   end
 
