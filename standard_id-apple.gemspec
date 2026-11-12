@@ -5,7 +5,7 @@ require_relative "lib/standard_id/apple/version"
 Gem::Specification.new do |spec|
   spec.name = "standard_id-apple"
   spec.version = StandardId::Apple::VERSION
-  spec.authors = ["Jaryl Sim"]
+  spec.authors = ["Rarebit One"]
   spec.email   = ["code@jaryl.dev"]
 
   spec.summary = "Apple Sign In provider plugin for the StandardId engine."
