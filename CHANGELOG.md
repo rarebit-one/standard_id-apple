@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-23
+
 ### Added
 
 - **Every request names the provider to `StandardId::HttpClient`** (`provider: :apple`): the web
   and native code exchanges, token revocation and the JWKS download. A standard_id that takes the
-  keyword (the release after 0.60.0) hands it to the host's `config.network_wrapper`, so a circuit
+  keyword (0.61.0 and later) hands it to the host's `config.network_wrapper`, so a circuit
   breaker or tracing span can tell Apple's calls apart. Against older standard_id releases the
   keyword is left out, detected from each method's parameters, so the `~> 0.42` requirement is
   unchanged. An error the wrapper raises itself (an open circuit) is not one of the transport
