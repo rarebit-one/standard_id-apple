@@ -149,7 +149,7 @@ module StandardId
                                                     code: code,
                                                     grant_type: "authorization_code",
                                                     redirect_uri: redirect_uri
-                                                  })
+                                                  }, **http_provider(:post_form))
 
             unless token_response.is_a?(Net::HTTPSuccess)
               raise StandardId::InvalidRequestError,
@@ -347,7 +347,7 @@ module StandardId
         # which hold the code/token and the client secret.
         def post_to_apple(endpoint, params, failure:)
           response = begin
-            HttpClient.post_form(endpoint, params)
+            HttpClient.post_form(endpoint, params, **http_provider(:post_form))
           rescue Timeout::Error, IOError, SocketError, SystemCallError, OpenSSL::SSL::SSLError, HttpClient::SsrfError => e
             raise StandardId::Apple::TokenRequestError, "#{failure}: #{e.class.name}"
           end
@@ -431,7 +431,7 @@ module StandardId
         def download_jwks
           rescue_to_oauth_error("Failed to fetch Apple JWKS") do
             uri, resolved_ip = HttpClient.send(:validate_url!, JWKS_URI)
-            response = HttpClient.send(:start_connection, uri, resolved_ip: resolved_ip) do |http|
+            response = HttpClient.send(:start_connection, uri, resolved_ip: resolved_ip, **http_provider(:start_connection)) do |http|
               http.request(Net::HTTP::Get.new(uri))
             end
             raise StandardId::OAuthError, "Failed to fetch Apple JWKS: HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
@@ -441,6 +441,18 @@ module StandardId
 
             keys
           end
+        end
+
+        # `provider: :apple` for StandardId::HttpClient, which hands it to the
+        # host's `config.network_wrapper` (e.g. one circuit per provider). Only
+        # standard_id releases after 0.60.0 take the keyword, and this plugin
+        # still supports older ones, so it is passed only when the method
+        # declares it. Read on each call rather than cached: Method#parameters
+        # costs nothing next to the request itself.
+        def http_provider(method_name)
+          parameters = HttpClient.method(method_name).parameters
+          accepts = parameters.include?([:key, :provider]) || parameters.any? { |type, _| type == :keyrest }
+          accepts ? { provider: :apple } : {}
         end
 
         def error_reason(response)
