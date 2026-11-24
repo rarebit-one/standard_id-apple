@@ -173,6 +173,23 @@ RSpec.describe StandardId::Providers::Apple, "network_wrapper refusals" do
       end
     end
 
+    context "when the wrapper raises after the request went through (a failing tracer)" do
+      let(:tracer_failed) { Class.new(StandardError) }
+
+      before do
+        error = tracer_failed
+        StandardId.config.network_wrapper = lambda do |provider:, &block|
+          block.call
+          raise error, "span export failed"
+        end
+      end
+
+      it "lets the wrapper's error through unchanged, not as a retryable TokenRequestError (the code is spent)" do
+        expect { described_class.exchange_authorization_code("code-2") }.to raise_error(tracer_failed, "span export failed")
+        expect(WebMock).to have_requested(:post, "https://appleid.apple.com/auth/token").once
+      end
+    end
+
     context "when the wrapper calls the block" do
       before { StandardId.config.network_wrapper = ->(provider:, &block) { block.call } }
 
