@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-25
+
 ### Fixed
 
 - **A refusal by the host's `config.network_wrapper` (an open circuit) is a `TokenRequestError`.**
@@ -19,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (API: 503). Core passes some wrapper errors through unchanged, and so does this gem: programming
   errors, and an error raised after the request went through (the code is then spent, so a
   retryable error would be wrong). On older standard_id releases nothing changes: the wrapper's
-  error still reaches the caller as is. The `~> 0.42` requirement is unchanged.
+  error still reaches the caller as is. The `~> 0.42` requirement is unchanged. The mapping is
+  feature-detected and takes effect with standard_id >= 0.63.0.
 
 ## [0.9.0] - 2026-11-23
 
