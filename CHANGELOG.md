@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A refusal by the host's `config.network_wrapper` (an open circuit) is a `TokenRequestError`.**
+  On a standard_id that raises `StandardId::ProviderUnavailableError` when the wrapper refuses a
+  request itself (rarebit-one/standard_id#480), `exchange_authorization_code` and `revoke` now turn
+  it into a retryable `TokenRequestError` (no HTTP status, the refusal as `cause`), as they do a
+  timeout, instead of letting the wrapper's error escape. A JWKS fetch refused while verifying the
+  exchanged id_token is reported the same way, not as `reason: "invalid_id_token"`. The sign-in
+  flows already pass the error through to core, which shows "Apple is temporarily unavailable"
+  (API: 503). Core passes some wrapper errors through unchanged, and so does this gem: programming
+  errors, and an error raised after the request went through (the code is then spent, so a
+  retryable error would be wrong). On older standard_id releases nothing changes: the wrapper's
+  error still reaches the caller as is. The `~> 0.42` requirement is unchanged.
+
 ## [0.9.0] - 2026-11-23
 
 ### Added
