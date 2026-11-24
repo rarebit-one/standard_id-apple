@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Announces its env vars to standard_health.** With standard_health 0.9+ loaded, the plugin
+  contributes its variables through standard_health's load hook, under `standard_id-apple`, so
+  apps no longer declare them by hand: `APPLE_CLIENT_ID` and `APPLE_MOBILE_CLIENT_ID`
+  (recommended), `APPLE_REDIRECT_URI` (recommended once the provider is on), and the signing triple
+  `APPLE_PRIVATE_KEY` / `APPLE_KEY_ID` / `APPLE_TEAM_ID` (required only once `apple_client_id`
+  switches the provider on and the app leaves the field to ENV, matching the boot check). Nothing is
+  required unconditionally, and an app's own `env_spec` declaration still wins. No dependency on
+  standard_health: without it the hook never runs.
+
 ## [0.10.0] - 2026-11-25
 
 ### Fixed
