@@ -149,7 +149,7 @@ module StandardId
                                                     code: code,
                                                     grant_type: "authorization_code",
                                                     redirect_uri: redirect_uri
-                                                  })
+                                                  }, **http_provider(:post_form))
 
             unless token_response.is_a?(Net::HTTPSuccess)
               raise StandardId::InvalidRequestError,
@@ -341,14 +341,16 @@ module StandardId
           raise StandardId::Apple::CredentialsMissingError, "Apple OAuth credentials are invalid: apple_private_key could not be loaded"
         end
 
-        # POST a form to Apple, raising TokenRequestError on a non-2xx response
-        # or a transport failure. Messages carry Apple's `error` value, the
-        # HTTP status or the exception class — never the request parameters,
-        # which hold the code/token and the client secret.
+        # POST a form to Apple, raising TokenRequestError on a non-2xx response,
+        # a transport failure, or a refusal by the host's network_wrapper (an
+        # open circuit). Messages carry Apple's `error` value, the HTTP status
+        # or the exception class — never the request parameters, which hold
+        # the code/token and the client secret.
         def post_to_apple(endpoint, params, failure:)
           response = begin
-            HttpClient.post_form(endpoint, params)
-          rescue Timeout::Error, IOError, SocketError, SystemCallError, OpenSSL::SSL::SSLError, HttpClient::SsrfError => e
+            HttpClient.post_form(endpoint, params, **http_provider(:post_form))
+          rescue Timeout::Error, IOError, SocketError, SystemCallError, OpenSSL::SSL::SSLError, HttpClient::SsrfError,
+                 *provider_unavailable_errors => e
             raise StandardId::Apple::TokenRequestError, "#{failure}: #{e.class.name}"
           end
           return response if response.is_a?(Net::HTTPSuccess)
@@ -387,6 +389,10 @@ module StandardId
           verify_id_token(id_token: id_token, client_id: client_id)
         rescue StandardId::Apple::TokenRequestError
           raise
+        rescue *provider_unavailable_errors => e
+          # The JWKS fetch was refused by the host's network_wrapper: an
+          # outage, not a bad token.
+          raise StandardId::Apple::TokenRequestError, "Apple id_token from the token response could not be verified: #{e.class.name}"
         rescue StandardId::OAuthError => e
           raise StandardId::Apple::TokenRequestError.new(
             "Apple id_token from the token response failed verification: #{e.message}", reason: "invalid_id_token"
@@ -431,7 +437,7 @@ module StandardId
         def download_jwks
           rescue_to_oauth_error("Failed to fetch Apple JWKS") do
             uri, resolved_ip = HttpClient.send(:validate_url!, JWKS_URI)
-            response = HttpClient.send(:start_connection, uri, resolved_ip: resolved_ip) do |http|
+            response = HttpClient.send(:start_connection, uri, resolved_ip: resolved_ip, **http_provider(:start_connection)) do |http|
               http.request(Net::HTTP::Get.new(uri))
             end
             raise StandardId::OAuthError, "Failed to fetch Apple JWKS: HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
@@ -441,6 +447,28 @@ module StandardId
 
             keys
           end
+        end
+
+        # `provider: :apple` for StandardId::HttpClient, which hands it to the
+        # host's `config.network_wrapper` (e.g. one circuit per provider). Only
+        # standard_id releases after 0.60.0 take the keyword, and this plugin
+        # still supports older ones, so it is passed only when the method
+        # declares it. Read on each call rather than cached: Method#parameters
+        # costs nothing next to the request itself.
+        def http_provider(method_name)
+          parameters = HttpClient.method(method_name).parameters
+          accepts = parameters.include?([:key, :provider]) || parameters.any? { |type, _| type == :keyrest }
+          accepts ? { provider: :apple } : {}
+        end
+
+        # StandardId::ProviderUnavailableError, raised by standard_id releases
+        # that have it when the host's `config.network_wrapper` refuses a
+        # request itself (an open circuit) rather than the request failing.
+        # On older releases there is nothing to rescue and the wrapper's error
+        # reaches the caller as is. The sign-in flows need no mapping: the
+        # error is an OAuthError, which rescue_to_oauth_error passes through.
+        def provider_unavailable_errors
+          defined?(StandardId::ProviderUnavailableError) ? [StandardId::ProviderUnavailableError] : []
         end
 
         def error_reason(response)

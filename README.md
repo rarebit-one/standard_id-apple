@@ -97,6 +97,25 @@ token against Apple's JWKS and needs no signing key. A native-only app (mobile
 client ID set, `apple_client_id` not) is therefore "not enabled" for the web
 UI while its native sign-in keeps working.
 
+### standard_health
+
+With [standard_health](https://github.com/rarebit-one/standard_health) 0.9+ in
+the bundle, the plugin declares these variables on `/diagnostics/env` and in
+`Checks::EnvSpecAudit`, grouped under `standard_id-apple`, so apps need not
+list them by hand. Without standard_health nothing happens: the gem does not
+depend on it.
+
+| Variable | Level | Applies |
+|---|---|---|
+| `APPLE_CLIENT_ID` | recommended | always (unset leaves the provider off) |
+| `APPLE_MOBILE_CLIENT_ID` | recommended | always (only apps with an iOS client need it) |
+| `APPLE_REDIRECT_URI` | recommended | once the provider is on |
+| `APPLE_PRIVATE_KEY`, `APPLE_KEY_ID`, `APPLE_TEAM_ID` | required | once the provider is on, for each field the app leaves to ENV (and, for the key, while `APPLE_PRIVATE_KEY_PEM` doesn't supply it) |
+
+The required rows follow the boot check above: they apply exactly when
+`apple_client_id` is set. An app that declares any of them in its own
+`env_spec` overrides the row here.
+
 ### Flows
 
 | Flow | Audience (`client_id`) | Needs signing key |

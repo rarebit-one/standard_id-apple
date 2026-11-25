@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-25
+
+### Added
+
+- **Announces its env vars to standard_health.** With standard_health 0.9+ loaded, the plugin
+  contributes its variables through standard_health's load hook, under `standard_id-apple`, so
+  apps no longer declare them by hand: `APPLE_CLIENT_ID` and `APPLE_MOBILE_CLIENT_ID`
+  (recommended), `APPLE_REDIRECT_URI` (recommended once the provider is on), and the signing triple
+  `APPLE_PRIVATE_KEY` / `APPLE_KEY_ID` / `APPLE_TEAM_ID` (required only once `apple_client_id`
+  switches the provider on and the app leaves the field to ENV, matching the boot check). Nothing is
+  required unconditionally, and an app's own `env_spec` declaration still wins. No dependency on
+  standard_health: without it the hook never runs.
+
+## [0.10.0] - 2026-11-25
+
+### Fixed
+
+- **A refusal by the host's `config.network_wrapper` (an open circuit) is a `TokenRequestError`.**
+  On a standard_id that raises `StandardId::ProviderUnavailableError` when the wrapper refuses a
+  request itself (rarebit-one/standard_id#480), `exchange_authorization_code` and `revoke` now turn
+  it into a retryable `TokenRequestError` (no HTTP status, the refusal as `cause`), as they do a
+  timeout, instead of letting the wrapper's error escape. A JWKS fetch refused while verifying the
+  exchanged id_token is reported the same way, not as `reason: "invalid_id_token"`. The sign-in
+  flows already pass the error through to core, which shows "Apple is temporarily unavailable"
+  (API: 503). Core passes some wrapper errors through unchanged, and so does this gem: programming
+  errors, and an error raised after the request went through (the code is then spent, so a
+  retryable error would be wrong). On older standard_id releases nothing changes: the wrapper's
+  error still reaches the caller as is. The `~> 0.42` requirement is unchanged. The mapping is
+  feature-detected and takes effect with standard_id >= 0.63.0.
+
+## [0.9.0] - 2026-11-23
+
+### Added
+
+- **Every request names the provider to `StandardId::HttpClient`** (`provider: :apple`): the web
+  and native code exchanges, token revocation and the JWKS download. A standard_id that takes the
+  keyword (0.61.0 and later) hands it to the host's `config.network_wrapper`, so a circuit
+  breaker or tracing span can tell Apple's calls apart. Against older standard_id releases the
+  keyword is left out, detected from each method's parameters, so the `~> 0.42` requirement is
+  unchanged. An error the wrapper raises itself (an open circuit) is not one of the transport
+  errors `exchange_authorization_code` and `revoke` turn into `TokenRequestError`, so it reaches
+  the caller as is.
+
 ## [0.8.0] - 2026-10-08
 
 ### Added
